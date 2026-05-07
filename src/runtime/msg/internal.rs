@@ -45,6 +45,8 @@ pub type LibraryPlanResponse = (Vec<String>, Vec<String>);
 //
 #[derive(Debug)]
 pub enum Internal {
+    /// No-operation sentinel — used by fire-and-forget effect futures.
+    Noop,
     /// Result for authenticate to API.
     CtxAuthResult(AuthRequest, Result<CtxAuthResponse, CtxError>),
     /// Result for pull addons from API.
@@ -173,4 +175,15 @@ pub enum Internal {
     /// Mark Season as watched (meta item)
     /// Mark move as watched (meta item)
     WatchedSendResult(MetaItemId, Result<RatingSendResponse, EnvError>),
+    /// Progress update dispatched by the preload polling loop (0.0..=1.0).
+    PreloadProgress {
+        info_hash: String,
+        /// Download fraction in range [0.0, 1.0].  1.0 means fully downloaded.
+        progress: f64,
+    },
+    /// Dispatched when a preload operation fails permanently.
+    PreloadFailed {
+        info_hash: String,
+        reason: String,
+    },
 }

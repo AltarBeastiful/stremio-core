@@ -17,6 +17,7 @@ pub const STREAMING_SERVER_URLS_STORAGE_KEY: &str = "streaming_server_urls";
 pub const NOTIFICATIONS_STORAGE_KEY: &str = "notifications";
 pub const CALENDAR_STORAGE_KEY: &str = "calendar";
 pub const DISMISSED_EVENTS_STORAGE_KEY: &str = "dismissed_events";
+pub const PRELOADED_ITEMS_STORAGE_KEY: &str = "preloadedItems";
 pub const LIBRARY_COLLECTION_NAME: &str = "libraryItem";
 pub const SEARCH_EXTRA_NAME: &str = "search";
 /// `https://{ADDON_UR}/meta/...` resource

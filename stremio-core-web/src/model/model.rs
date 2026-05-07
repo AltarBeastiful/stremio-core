@@ -20,8 +20,7 @@ use stremio_core::{
         link::Link,
         local_search::LocalSearch,
         meta_details::MetaDetails,
-        player::Player,
-        streaming_server::StreamingServer,
+        player::Player,        preloaded_items::PreloadedItems,        streaming_server::StreamingServer,
     },
     runtime::Effects,
     types::{
@@ -57,6 +56,7 @@ pub struct WebModel {
     pub addon_details: AddonDetails,
     pub streaming_server: StreamingServer,
     pub player: Player,
+    pub preloaded_items: PreloadedItems,
 }
 
 impl WebModel {
@@ -111,6 +111,7 @@ impl WebModel {
                 collect_seek_logs: true,
                 ..Default::default()
             },
+            preloaded_items: Default::default(),
         };
         (
             model,
@@ -187,6 +188,10 @@ impl WebModel {
             WebModelField::StreamingServer => serialize_streaming_server(&self.streaming_server),
             WebModelField::Player => {
                 serialize_player::<WebEnv>(&self.player, &self.ctx, &self.streaming_server)
+            }
+            WebModelField::PreloadedItems => {
+                <JsValue as JsValueSerdeExt>::from_serde(&self.preloaded_items)
+                    .expect("JsValue from PreloadedItems")
             }
         }
     }

@@ -235,6 +235,28 @@ pub enum ActionPlayer {
     MarkVideoAsWatched(Video, bool),
     /// Mark all videos from given season as watched
     MarkSeasonAsWatched(u32, bool),
+    /// Start background full-file download so the stream is ready for instant playback.
+    #[serde(rename_all = "camelCase")]
+    Preload {
+        /// The hex-encoded info hash of the torrent.
+        info_hash: String,
+        /// File index within the torrent (0-based).
+        file_idx: u64,
+        /// IMDb ID for the content (used for subtitle fetch and badge grouping).
+        imdb_id: String,
+        /// Human-readable title shown in the preload list.
+        title: String,
+    },
+    /// Poll the progress of an in-progress preload (dispatch from UI setInterval).
+    #[serde(rename_all = "camelCase")]
+    PollPreload {
+        info_hash: String,
+    },
+    /// Cancel a running preload and remove it from the preloaded items list.
+    #[serde(rename_all = "camelCase")]
+    CancelPreload {
+        info_hash: String,
+    },
 }
 
 #[derive(Clone, Deserialize, Debug)]
