@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use enclose::enclose;
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use http::Request;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -239,13 +239,10 @@ fn start_preload_effect<E: Env + 'static>(
 
     EffectFuture::Concurrent(
         E::fetch::<(), serde_json::Value>(request)
-            .map_ok(|_| ())
             .map(enclose!((info_hash) move |result| match result {
-                Ok(()) => Msg::Internal(Internal::PreloadProgress {
-                    info_hash,
-                    progress: 0.0,
-                    speed_bps: 0.0,
-                }),
+                // POST succeeded: the server has queued the download.  The model
+                // already shows Pending, so no further update is needed here.
+                Ok(_) => Msg::Internal(Internal::Noop),
                 Err(err) => Msg::Internal(Internal::PreloadFailed {
                     info_hash,
                     reason: err.message(),
