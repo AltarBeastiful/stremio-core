@@ -12,10 +12,13 @@ use wasm_bindgen::{prelude::wasm_bindgen, JsValue, UnwrapThrowExt};
 use stremio_core::{
     constants::{
         DISMISSED_EVENTS_STORAGE_KEY, LIBRARY_RECENT_STORAGE_KEY, LIBRARY_STORAGE_KEY,
-        NOTIFICATIONS_STORAGE_KEY, PROFILE_STORAGE_KEY, SEARCH_HISTORY_STORAGE_KEY,
-        STREAMING_SERVER_URLS_STORAGE_KEY, STREAMS_STORAGE_KEY,
+        NOTIFICATIONS_STORAGE_KEY, PRELOADED_ITEMS_STORAGE_KEY, PROFILE_STORAGE_KEY,
+        SEARCH_HISTORY_STORAGE_KEY, STREAMING_SERVER_URLS_STORAGE_KEY, STREAMS_STORAGE_KEY,
     },
-    models::common::Loadable,
+    models::{
+        common::Loadable,
+        preloaded_items::PreloadedItems,
+    },
     runtime::{msg::Action, Env, EnvError, Runtime, RuntimeAction, RuntimeEvent},
     types::{
         events::DismissedEventsBucket,
@@ -119,6 +122,7 @@ pub async fn initialize_runtime(emit_to_ui: js_sys::Function) -> Result<(), JsVa
                 WebEnv::get_storage::<NotificationsBucket>(NOTIFICATIONS_STORAGE_KEY),
                 WebEnv::get_storage::<SearchHistoryBucket>(SEARCH_HISTORY_STORAGE_KEY),
                 WebEnv::get_storage::<DismissedEventsBucket>(DISMISSED_EVENTS_STORAGE_KEY),
+                WebEnv::get_storage::<PreloadedItems>(PRELOADED_ITEMS_STORAGE_KEY),
             );
             match storage_result {
                 Ok((
@@ -130,6 +134,7 @@ pub async fn initialize_runtime(emit_to_ui: js_sys::Function) -> Result<(), JsVa
                     notifications_bucket,
                     search_history_bucket,
                     dismissed_events_bucket,
+                    preloaded_items_stored,
                 )) => {
                     let profile = profile.unwrap_or_default();
                     let mut library = LibraryBucket::new(profile.uid(), vec![]);
@@ -150,6 +155,9 @@ pub async fn initialize_runtime(emit_to_ui: js_sys::Function) -> Result<(), JsVa
                         search_history_bucket.unwrap_or(SearchHistoryBucket::new(profile.uid()));
                     let dismissed_events_bucket = dismissed_events_bucket
                         .unwrap_or(DismissedEventsBucket::new(profile.uid()));
+                    let mut preloaded_items =
+                        preloaded_items_stored.unwrap_or_default();
+                    preloaded_items.apply_restart_recovery();
                     let (model, effects) = WebModel::new(
                         profile,
                         library,
@@ -158,6 +166,7 @@ pub async fn initialize_runtime(emit_to_ui: js_sys::Function) -> Result<(), JsVa
                         notifications_bucket,
                         search_history_bucket,
                         dismissed_events_bucket,
+                        preloaded_items,
                     );
                     let (runtime, rx) = Runtime::<WebEnv, _>::new(
                         model,

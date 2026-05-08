@@ -180,6 +180,8 @@ pub enum Internal {
         info_hash: String,
         /// Download fraction in range [0.0, 1.0].  1.0 means fully downloaded.
         progress: f64,
+        /// Download speed in bytes/sec; 0.0 when not in Downloading state.
+        speed_bps: f64,
     },
     /// Dispatched when a preload operation fails permanently.
     PreloadFailed {

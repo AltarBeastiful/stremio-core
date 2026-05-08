@@ -68,6 +68,7 @@ impl WebModel {
         notifications: NotificationsBucket,
         search_history: SearchHistoryBucket,
         dismissed_events: DismissedEventsBucket,
+        preloaded_items: PreloadedItems,
     ) -> (WebModel, Effects) {
         let (continue_watching_preview, continue_watching_preview_effects) =
             ContinueWatchingPreview::new(&library, &notifications);
@@ -111,7 +112,7 @@ impl WebModel {
                 collect_seek_logs: true,
                 ..Default::default()
             },
-            preloaded_items: Default::default(),
+            preloaded_items,
         };
         (
             model,

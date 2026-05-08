@@ -257,6 +257,12 @@ pub enum ActionPlayer {
     CancelPreload {
         info_hash: String,
     },
+    /// Delete a preloaded file from disk: abort if still downloading, then instruct
+    /// the streaming server to remove the downloaded data from disk.
+    #[serde(rename_all = "camelCase")]
+    DeletePreload {
+        info_hash: String,
+    },
 }
 
 #[derive(Clone, Deserialize, Debug)]
