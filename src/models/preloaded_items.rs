@@ -16,9 +16,16 @@ use crate::models::ctx::Ctx;
 // Types
 // ---------------------------------------------------------------------------
 
+/// Maximum number of torrents the model will actively download at once.
+/// Queue additional requests behind those that are already in flight.
+pub const MAX_CONCURRENT_PRELOADS: usize = 1;
+
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", tag = "status")]
 pub enum PreloadStatus {
+    /// Waiting in queue — POST not sent yet; a previous download is in progress.
+    Queued,
+    /// POST sent to the server; server has acknowledged and is starting the download.
     Pending,
     InProgress { progress: f64 },
     Ready,
@@ -48,23 +55,55 @@ pub struct PreloadedItems {
 }
 
 impl PreloadedItems {
-    /// Apply restart-recovery: any entries that were Pending/InProgress when
-    /// the app was closed are transitions to Failed, because the polling loop
-    /// is no longer running and we cannot resume mid-download.
+    /// Number of entries that have been started (POST sent) and are not yet done.
+    fn active_count(&self) -> usize {
+        self.items
+            .values()
+            .filter(|e| {
+                matches!(
+                    e.status,
+                    PreloadStatus::Pending | PreloadStatus::InProgress { .. }
+                )
+            })
+            .count()
+    }
+
+    /// Find the oldest Queued entry (by `added_at`), start it, and return
+    /// the resulting effect (or `Effects::none()` if the queue is empty).
+    fn advance_queue<E: Env + 'static>(
+        &mut self,
+        base_url: &Url,
+    ) -> Effects {
+        // Find the oldest entry with Queued status.
+        let next = self
+            .items
+            .values_mut()
+            .filter(|e| e.status == PreloadStatus::Queued)
+            .min_by_key(|e| e.added_at);
+
+        if let Some(entry) = next {
+            entry.status = PreloadStatus::Pending;
+            let info_hash = entry.info_hash.clone();
+            let file_idx  = entry.file_idx;
+            Effects::one(start_preload_effect::<E>(base_url.clone(), info_hash, file_idx))
+        } else {
+            Effects::none().unchanged()
+        }
+    }
+
+    /// Apply restart-recovery: any entries that were Pending/InProgress or Queued
+    /// when the app was closed are cleared (server session is gone).
     ///
     /// Ready entries are kept as-is — the file is still on disk.
     pub fn apply_restart_recovery(&mut self) {
-        for entry in self.items.values_mut() {
-            match &entry.status {
-                PreloadStatus::Pending | PreloadStatus::InProgress { .. } => {
-                    entry.status = PreloadStatus::Failed {
-                        reason: "App was restarted during download. Re-trigger preload to resume."
-                            .to_string(),
-                    };
-                }
-                _ => {}
-            }
-        }
+        self.items.retain(|_, entry| {
+            !matches!(
+                entry.status,
+                PreloadStatus::Queued
+                    | PreloadStatus::Pending
+                    | PreloadStatus::InProgress { .. }
+            )
+        });
     }
 }
 
@@ -108,15 +147,26 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
             })) => {
                 let info_hash = info_hash.to_lowercase();
 
-                // Idempotent: if already tracking, skip.
+                // Idempotent: if already actively tracking, skip.
                 if let Some(entry) = self.items.get(&info_hash) {
                     match &entry.status {
-                        PreloadStatus::Pending | PreloadStatus::InProgress { .. } => {
+                        PreloadStatus::Queued
+                        | PreloadStatus::Pending
+                        | PreloadStatus::InProgress { .. } => {
                             return Effects::none().unchanged();
                         }
                         _ => {}
                     }
                 }
+
+                // Decide whether to start immediately or queue behind active downloads.
+                let active = self.active_count();
+                let initial_status = if active < MAX_CONCURRENT_PRELOADS {
+                    PreloadStatus::Pending
+                } else {
+                    PreloadStatus::Queued
+                };
+                let start_now = initial_status == PreloadStatus::Pending;
 
                 self.items.insert(
                     info_hash.clone(),
@@ -125,22 +175,26 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
                         file_idx: *file_idx,
                         imdb_id: imdb_id.clone(),
                         title: title.clone(),
-                        status: PreloadStatus::Pending,
+                        status: initial_status,
                         added_at: E::now(),
                         speed_bps: 0.0,
                     },
                 );
 
                 let base = ctx.profile.settings.streaming_server_url.clone();
-                Effects::one(start_preload_effect::<E>(base, info_hash, *file_idx))
-                    .join(Effects::one(save_to_storage_effect::<E>(self)))
+                let start_effects = if start_now {
+                    Effects::one(start_preload_effect::<E>(base, info_hash, *file_idx))
+                } else {
+                    Effects::none()
+                };
+                start_effects.join(Effects::one(save_to_storage_effect::<E>(self)))
             }
 
             // ---- poll status -----------------------------------------------------
             Msg::Action(Action::Player(ActionPlayer::PollPreload { info_hash })) => {
                 let info_hash = info_hash.to_lowercase();
 
-                // Only poll if we're actually tracking it.
+                // Only poll if we're actively downloading (not queued).
                 match self.items.get(&info_hash).map(|e| &e.status) {
                     Some(PreloadStatus::Pending | PreloadStatus::InProgress { .. }) => {
                         let base = ctx.profile.settings.streaming_server_url.clone();
@@ -162,9 +216,19 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
                     let speed_changed = (entry.speed_bps - speed_bps).abs() > 1.0;
                     let status_changed = entry.status != new_status;
                     if status_changed || speed_changed {
-                        entry.status = new_status;
+                        entry.status = new_status.clone();
                         entry.speed_bps = *speed_bps;
-                        Effects::one(save_to_storage_effect::<E>(self))
+
+                        // If this entry just became Ready, advance the queue.
+                        let queue_effects = if new_status == PreloadStatus::Ready {
+                            let base = ctx.profile.settings.streaming_server_url.clone();
+                            self.advance_queue::<E>(&base)
+                        } else {
+                            Effects::none().unchanged()
+                        };
+
+                        queue_effects
+                            .join(Effects::one(save_to_storage_effect::<E>(self)))
                     } else {
                         Effects::none().unchanged()
                     }
@@ -179,7 +243,13 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
                     let new_status = PreloadStatus::Failed { reason: reason.clone() };
                     if entry.status != new_status {
                         entry.status = new_status;
-                        Effects::one(save_to_storage_effect::<E>(self))
+
+                        // Failed entry frees a slot — advance the queue.
+                        let base = ctx.profile.settings.streaming_server_url.clone();
+                        let queue_effects = self.advance_queue::<E>(&base);
+
+                        queue_effects
+                            .join(Effects::one(save_to_storage_effect::<E>(self)))
                     } else {
                         Effects::none().unchanged()
                     }
@@ -191,9 +261,17 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
             // ---- cancel preload --------------------------------------------------
             Msg::Action(Action::Player(ActionPlayer::CancelPreload { info_hash })) => {
                 let info_hash = info_hash.to_lowercase();
-                if self.items.remove(&info_hash).is_some() {
+                if let Some(removed) = self.items.remove(&info_hash) {
                     let base = ctx.profile.settings.streaming_server_url.clone();
-                    Effects::one(cancel_preload_effect::<E>(base, info_hash))
+                    // Only send DELETE to server if the download had actually started.
+                    let cancel_effects = match removed.status {
+                        PreloadStatus::Queued => Effects::none(),
+                        _ => Effects::one(cancel_preload_effect::<E>(base.clone(), info_hash)),
+                    };
+                    // A slot may now be free — advance the queue.
+                    let queue_effects = self.advance_queue::<E>(&base);
+                    cancel_effects
+                        .join(queue_effects)
                         .join(Effects::one(save_to_storage_effect::<E>(self)))
                         .unchanged()
                 } else {
@@ -204,9 +282,15 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
             // ---- hard-delete preload (abort + delete files from disk) ------------
             Msg::Action(Action::Player(ActionPlayer::DeletePreload { info_hash })) => {
                 let info_hash = info_hash.to_lowercase();
-                if self.items.remove(&info_hash).is_some() {
+                if let Some(removed) = self.items.remove(&info_hash) {
                     let base = ctx.profile.settings.streaming_server_url.clone();
-                    Effects::one(delete_preload_effect::<E>(base, info_hash))
+                    let delete_effects = match removed.status {
+                        PreloadStatus::Queued => Effects::none(),
+                        _ => Effects::one(delete_preload_effect::<E>(base.clone(), info_hash)),
+                    };
+                    let queue_effects = self.advance_queue::<E>(&base);
+                    delete_effects
+                        .join(queue_effects)
                         .join(Effects::one(save_to_storage_effect::<E>(self)))
                         .unchanged()
                 } else {
