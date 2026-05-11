@@ -40,6 +40,9 @@ pub struct PreloadEntry {
     pub file_idx: u64,
     pub imdb_id: String,
     pub title: String,
+    /// Content type (e.g. "movie" or "series"), used to build deep-link URLs.
+    #[serde(default)]
+    pub content_type: String,
     pub status: PreloadStatus,
     pub added_at: DateTime<Utc>,
     /// Current download speed in bytes/sec (0.0 when not downloading).
@@ -145,6 +148,7 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
                 file_idx,
                 imdb_id,
                 title,
+                content_type,
             })) => {
                 let info_hash = info_hash.to_lowercase();
 
@@ -176,6 +180,7 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
                         file_idx: *file_idx,
                         imdb_id: imdb_id.clone(),
                         title: title.clone(),
+                        content_type: content_type.clone(),
                         status: initial_status,
                         added_at: E::now(),
                         speed_bps: 0.0,

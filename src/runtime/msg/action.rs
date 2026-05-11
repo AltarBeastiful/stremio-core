@@ -244,8 +244,11 @@ pub enum ActionPlayer {
         file_idx: u64,
         /// IMDb ID for the content (used for subtitle fetch and badge grouping).
         imdb_id: String,
-        /// Human-readable title shown in the preload list.
+        /// Human-readable title shown in the preload list (e.g. "The Matrix — 4K HDR").
         title: String,
+        /// Content type string (e.g. "movie" or "series"), used for deep-links.
+        #[serde(default)]
+        content_type: String,
     },
     /// Poll the progress of an in-progress preload (dispatch from UI setInterval).
     #[serde(rename_all = "camelCase")]
