@@ -8,6 +8,7 @@ use url::Url;
 
 use crate::runtime::msg::{Action, ActionPlayer, Internal, Msg};
 use crate::runtime::{Effect, EffectFuture, Effects, Env, EnvFutureExt, UpdateWithCtx};
+use crate::runtime::msg::Event;
 use crate::constants::PRELOADED_ITEMS_STORAGE_KEY;
 
 use crate::models::ctx::Ctx;
@@ -219,10 +220,14 @@ impl<E: Env + 'static> UpdateWithCtx<E> for PreloadedItems {
                         entry.status = new_status.clone();
                         entry.speed_bps = *speed_bps;
 
-                        // If this entry just became Ready, advance the queue.
+                        // If this entry just became Ready, advance the queue and emit notification.
                         let queue_effects = if new_status == PreloadStatus::Ready {
                             let base = ctx.profile.settings.streaming_server_url.clone();
-                            self.advance_queue::<E>(&base)
+                            let notify = Effects::msg(Msg::Event(Event::PreloadCompleted {
+                                info_hash: entry.info_hash.clone(),
+                                title: entry.title.clone(),
+                            }));
+                            self.advance_queue::<E>(&base).join(notify)
                         } else {
                             Effects::none().unchanged()
                         };

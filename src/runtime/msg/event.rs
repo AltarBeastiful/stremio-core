@@ -155,6 +155,11 @@ pub enum Event {
     StreamingServerUrlsPushedToStorage {
         uid: UID,
     },
+    /// Emitted when a preload finishes successfully (status transitions to Ready).
+    PreloadCompleted {
+        info_hash: String,
+        title: String,
+    },
     Error {
         error: CtxError,
         source: Box<Event>,
